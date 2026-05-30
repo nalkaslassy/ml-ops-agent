@@ -65,19 +65,15 @@ predictions = model.predict(new_df)
 
 ---
 
-### In Progress
-
 #### SentimentModel — Sentiment Analysis
 Classifies text (reviews, feedback, comments) as positive or negative.
 
 - **Input:** Dataset with a text column and a sentiment label column
 - **Algorithms:** XGBoost, Random Forest, Logistic Regression (over TF-IDF features)
 - **Output:** `label`, `confidence`
-- **Status:** Legacy implementation working. Modular version (matching ChurnModel pattern) in progress.
 
 ```python
-# Coming soon (modular version)
-from ml_model_library.models.sentiment.sentiment_model import SentimentModel
+from sentiment.sentiment_model import SentimentModel
 
 model = SentimentModel(text_col="review", target_col="sentiment")
 model.fit(df)
@@ -124,7 +120,7 @@ ml-ops-agent/
 │   │   │   │   ├── random_forest_clf.py
 │   │   │   │   └── logistic_clf.py
 │   │   │   └── churn_model.py
-│   │   ├── sentiment/              🔄 In progress
+│   │   ├── sentiment/              ✅ Complete
 │   │   │   ├── algorithms/
 │   │   │   └── sentiment_model.py
 │   │   ├── fraud/                  📋 Planned
