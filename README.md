@@ -1,76 +1,61 @@
 # ML Ops Agent
 
-An extensible ML platform that automatically selects the best algorithm for your business problem. You provide a cleaned dataset, specify what you want to predict, and the agent handles everything else — competing algorithms, hyperparameter tuning, and model selection.
+An ML platform that automatically finds the best algorithm for your business problem. You provide a cleaned dataset, and the agent tests multiple algorithms against each other, tunes each one, and picks the best performer.
 
 ---
 
-## How It Works
+## How it works
+
+For each model, the agent runs **3 algorithms** (XGBoost, Random Forest, Logistic Regression). Each algorithm is tuned with **10 different hyperparameter combinations** tested via **5-fold cross-validation**. Whichever algorithm scores highest on your data wins.
 
 ```
-You describe the task (e.g. churn prediction)
-        ↓
-Provide a cleaned, compatible dataset
-        ↓
-The agent runs all algorithms in the registry for that task:
-    ├── XGBoost       → 10 random hyperparameter combos, 5-fold CV
-    ├── Random Forest → 10 random hyperparameter combos, 5-fold CV
-    └── Logistic Regression → 10 random hyperparameter combos, 5-fold CV
-        ↓
-Best algorithm + best hyperparameters are selected automatically
-        ↓
-Returns predictions in plain business terms (e.g. risk tier, probability, label)
+Your dataset
+    ↓
+XGBoost       → 10 hyperparameter combos, 5-fold CV → best score
+Random Forest → 10 hyperparameter combos, 5-fold CV → best score
+Logistic Reg  → 10 hyperparameter combos, 5-fold CV → best score
+    ↓
+Winner selected automatically
+    ↓
+Predictions returned in plain business terms
 ```
-
-**The agent uses a plugin architecture** — every task has its own folder with a registry of competing algorithms. Adding a new algorithm to any task is as simple as dropping a new file in its `algorithms/` folder.
-
-**Coming soon: LLM-powered router** — instead of picking the model yourself, you'll describe your business problem in plain English (e.g. *"which customers are likely to cancel?"*) and the agent will automatically route you to the right model.
 
 ---
 
-## Data Requirements
+## Data requirements
 
-> **Your data must be cleaned before passing it to the agent.**
+- Your dataset must be **cleaned** before passing it in (no nulls, correct column types)
+- You must specify which column is the target (what you want to predict)
+- **If your data is not compatible with the model you're using, it will raise a clear error and stop** — for example, passing a dataset with no text column to SentimentModel, or passing non-binary labels to ChurnModel
 
-The agent does not handle raw or messy data at this stage. Before using any model:
-
-- Remove or impute missing values
-- Ensure column types are correct (numbers as numeric, text as string)
-- Ensure the target column contains the labels you want to predict
-
-**If the dataset is not compatible with the requested task, the model will raise a validation error and not run.** For example, passing a dataset with no text column to the SentimentModel, or passing a dataset without a binary target column to the ChurnModel, will fail with a clear explanation.
-
-> **Planned:** Automatic data cleaning and compatibility checking is on the roadmap — the agent will eventually handle dirty data and guide you through fixes automatically.
+> Automatic data cleaning is planned for a future version.
 
 ---
 
 ## Models
 
-### Done
+### Churn Prediction — `churn/churn_model.py`
 
-#### ChurnModel — Customer Churn Prediction
 Predicts which customers are at risk of leaving.
 
-- **Input:** Tabular dataset with numeric and/or categorical customer features + a binary churn target column
-- **Algorithms:** XGBoost, Random Forest, Logistic Regression
-- **Output:** `churn_probability`, `will_churn`, `risk_tier` (Low / Medium / High)
-- **Compatible data:** Any dataset with a binary churn/retention label (e.g. telecom, SaaS, e-commerce)
+**Compatible data:** Any tabular dataset with customer features and a binary churn column (0 = stayed, 1 = churned)
 
 ```python
-from ml_model_library.models.churn.churn_model import ChurnModel
+from churn.churn_model import ChurnModel
 
 model = ChurnModel(target_col="churned", drop_cols=["customer_id"])
 model.fit(df)
 predictions = model.predict(new_df)
+# Returns: churn_probability, will_churn, risk_tier (Low / Medium / High)
 ```
 
 ---
 
-#### SentimentModel — Sentiment Analysis
+### Sentiment Analysis — `sentiment/sentiment_model.py`
+
 Classifies text (reviews, feedback, comments) as positive or negative.
 
-- **Input:** Dataset with a text column and a sentiment label column
-- **Algorithms:** XGBoost, Random Forest, Logistic Regression (over TF-IDF features)
-- **Output:** `label`, `confidence`
+**Compatible data:** Any dataset with a text column and a binary label column (0/1 or "positive"/"negative")
 
 ```python
 from sentiment.sentiment_model import SentimentModel
@@ -78,90 +63,52 @@ from sentiment.sentiment_model import SentimentModel
 model = SentimentModel(text_col="review", target_col="sentiment")
 model.fit(df)
 predictions = model.predict(new_df)
+# Returns: text, label, confidence
 ```
 
 ---
 
-### Planned
+### Fraud Detection — `fraud/fraud_model.py` *(coming soon)*
 
-#### FraudModel — Fraud Detection
-Identifies fraudulent transactions in a dataset with extreme class imbalance.
+Identifies fraudulent transactions. Designed for datasets where fraud is <1% of records.
 
-- **Algorithms planned:** Isolation Forest (unsupervised) + Random Forest (supervised)
-- **Metric:** Precision-Recall AUC (more appropriate than ROC-AUC for heavily imbalanced data)
-- **Compatible data:** Transaction datasets where fraud is <1% of records
-
-#### SegmentationModel — Customer Segmentation
-Discovers natural customer groups without a target label (unsupervised).
-
-- **Algorithms planned:** K-Means, DBSCAN
-- **Selection:** Silhouette score used to pick optimal number of clusters
-- **Output:** Cluster labels + segment profiles for marketing or targeting
-
-#### LLM Router
-Routes plain-English business problems to the correct model automatically.
-
-- **Example:** *"Which of my customers are about to cancel?"* → `ChurnModel`
-- **Example:** *"Are my product reviews mostly positive or negative?"* → `SentimentModel`
-- **Built with:** Claude API
-- **Status:** Planned — will be built once core models are complete
+Planned algorithms: Isolation Forest + Random Forest
 
 ---
 
-## Project Structure
+### Customer Segmentation — `segmentation/segmentation_model.py` *(coming soon)*
+
+Groups customers into segments with no target label needed (unsupervised).
+
+Planned algorithms: K-Means + DBSCAN
+
+---
+
+## Project structure
 
 ```
 ml-ops-agent/
-├── ml-model-library/
-│   ├── models/
-│   │   ├── churn/                  ✅ Complete
-│   │   │   ├── algorithms/
-│   │   │   │   ├── xgboost_clf.py
-│   │   │   │   ├── random_forest_clf.py
-│   │   │   │   └── logistic_clf.py
-│   │   │   └── churn_model.py
-│   │   ├── sentiment/              ✅ Complete
-│   │   │   ├── algorithms/
-│   │   │   └── sentiment_model.py
-│   │   ├── fraud/                  📋 Planned
-│   │   └── segmentation/           📋 Planned
-│   ├── notebooks/                  # Jupyter notebooks for each model
-│   └── data/sample_datasets/       # Drop your CSV files here
+├── churn/
+│   ├── churn_model.py       ✅ complete
+│   └── churn_notebook.ipynb
+├── sentiment/
+│   ├── sentiment_model.py   ✅ complete
+│   └── sentiment_notebook.ipynb
+├── fraud/
+│   └── fraud_model.py       coming soon
+├── segmentation/
+│   └── segmentation_model.py  coming soon
 └── agent/
-    └── router.py                   📋 Planned — LLM-powered routing
+    └── router.py            coming soon — LLM-powered routing
 ```
 
 ---
 
-## Adding a New Algorithm
+## LLM Router *(coming soon)*
 
-Drop a file in the relevant `algorithms/` folder:
+Instead of picking the model yourself, you'll describe your problem in plain English and the agent routes you automatically:
 
-```python
-# ml-model-library/models/churn/algorithms/lightgbm_clf.py
-
-ALGORITHM_NAME = "LightGBM"
-
-def get_estimator():
-    from lightgbm import LGBMClassifier
-    return LGBMClassifier(random_state=42)
-
-def get_param_grid():
-    return {
-        "classifier__n_estimators": [100, 200, 300],
-        "classifier__learning_rate": [0.01, 0.05, 0.1],
-        "classifier__max_depth":     [3, 5, 7],
-    }
-```
-
-Then register it in `algorithms/__init__.py` and it will automatically compete alongside the existing algorithms.
-
----
-
-## Tech Stack
-
-- `scikit-learn` — pipelines, preprocessing, cross-validation
-- `xgboost` — gradient boosting
-- `pandas` / `numpy` — data handling
-- `matplotlib` — visualizations (ROC curves, confusion matrices, algorithm comparison)
-- `jupyter` — interactive notebooks for experimentation
+- *"Which customers are about to cancel?"* → ChurnModel
+- *"Are these reviews positive or negative?"* → SentimentModel
+- *"Flag suspicious transactions"* → FraudModel
+- *"Group my customers into segments"* → SegmentationModel
