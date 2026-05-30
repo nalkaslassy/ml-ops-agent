@@ -1,44 +1,33 @@
 # ML Ops Agent
 
-An ML platform that automatically finds the best algorithm for your business problem. You provide a cleaned dataset, and the agent tests multiple algorithms against each other, tunes each one, and picks the best performer.
+Give it a cleaned dataset, tell it what you want to predict, and it figures out the best ML algorithm for your data automatically.
 
 ---
 
 ## How it works
 
-For each model, the agent runs **3 algorithms** (XGBoost, Random Forest, Logistic Regression). Each algorithm is tuned with **10 different hyperparameter combinations** tested via **5-fold cross-validation**. Whichever algorithm scores highest on your data wins.
+The agent runs 3 algorithms on your data — XGBoost, Random Forest, and Logistic Regression. Each one is tested with 10 different settings using 5-fold cross-validation. The one that scores highest on your specific dataset wins and is used for predictions.
 
-```
-Your dataset
-    ↓
-XGBoost       → 10 hyperparameter combos, 5-fold CV → best score
-Random Forest → 10 hyperparameter combos, 5-fold CV → best score
-Logistic Reg  → 10 hyperparameter combos, 5-fold CV → best score
-    ↓
-Winner selected automatically
-    ↓
-Predictions returned in plain business terms
-```
+You don't pick the algorithm. The agent does.
 
 ---
 
-## Data requirements
+## Important: data requirements
 
-- Your dataset must be **cleaned** before passing it in (no nulls, correct column types)
-- You must specify which column is the target (what you want to predict)
-- **If your data is not compatible with the model you're using, it will raise a clear error and stop** — for example, passing a dataset with no text column to SentimentModel, or passing non-binary labels to ChurnModel
+- Your dataset must be **cleaned** before using it (no missing values, correct column types)
+- You need to tell it which column you want to predict
+- If your data isn't compatible with the model you're using, it will stop and tell you exactly why
 
 > Automatic data cleaning is planned for a future version.
 
 ---
 
-## Models
+## What's available
 
-### Churn Prediction — `churn/churn_model.py`
+### Churn Prediction ✅
+**File:** `churn/churn_model.py`
 
-Predicts which customers are at risk of leaving.
-
-**Compatible data:** Any tabular dataset with customer features and a binary churn column (0 = stayed, 1 = churned)
+Predicts which customers are likely to leave. Give it a dataset with customer features and a column marking who churned (0 = stayed, 1 = left).
 
 ```python
 from churn.churn_model import ChurnModel
@@ -46,16 +35,15 @@ from churn.churn_model import ChurnModel
 model = ChurnModel(target_col="churned", drop_cols=["customer_id"])
 model.fit(df)
 predictions = model.predict(new_df)
-# Returns: churn_probability, will_churn, risk_tier (Low / Medium / High)
+# Returns: churn_probability, will_churn, risk_tier (Low / Medium / High Risk)
 ```
 
 ---
 
-### Sentiment Analysis — `sentiment/sentiment_model.py`
+### Sentiment Analysis ✅
+**File:** `sentiment/sentiment_model.py`
 
-Classifies text (reviews, feedback, comments) as positive or negative.
-
-**Compatible data:** Any dataset with a text column and a binary label column (0/1 or "positive"/"negative")
+Classifies text as positive or negative. Works on reviews, feedback, comments — anything with a text column and a label.
 
 ```python
 from sentiment.sentiment_model import SentimentModel
@@ -63,24 +51,24 @@ from sentiment.sentiment_model import SentimentModel
 model = SentimentModel(text_col="review", target_col="sentiment")
 model.fit(df)
 predictions = model.predict(new_df)
-# Returns: text, label, confidence
+# Returns: text, label (Positive / Negative), confidence score
 ```
 
----
-
-### Fraud Detection — `fraud/fraud_model.py` *(coming soon)*
-
-Identifies fraudulent transactions. Designed for datasets where fraud is <1% of records.
-
-Planned algorithms: Isolation Forest + Random Forest
+Labels can be 0/1 or strings like "positive"/"negative" — either works.
 
 ---
 
-### Customer Segmentation — `segmentation/segmentation_model.py` *(coming soon)*
+### Fraud Detection 🔜
+**File:** `fraud/fraud_model.py`
 
-Groups customers into segments with no target label needed (unsupervised).
+Coming soon. Built for transaction datasets where fraud is a small fraction of records.
 
-Planned algorithms: K-Means + DBSCAN
+---
+
+### Customer Segmentation 🔜
+**File:** `segmentation/segmentation_model.py`
+
+Coming soon. Groups customers into segments — no target label needed.
 
 ---
 
@@ -89,26 +77,26 @@ Planned algorithms: K-Means + DBSCAN
 ```
 ml-ops-agent/
 ├── churn/
-│   ├── churn_model.py       ✅ complete
+│   ├── churn_model.py        ✅ ready
 │   └── churn_notebook.ipynb
 ├── sentiment/
-│   ├── sentiment_model.py   ✅ complete
+│   ├── sentiment_model.py    ✅ ready
 │   └── sentiment_notebook.ipynb
 ├── fraud/
-│   └── fraud_model.py       coming soon
+│   └── fraud_model.py        coming soon
 ├── segmentation/
-│   └── segmentation_model.py  coming soon
+│   └── segmentation_model.py coming soon
 └── agent/
-    └── router.py            coming soon — LLM-powered routing
+    └── router.py             coming soon
 ```
 
 ---
 
-## LLM Router *(coming soon)*
+## Coming soon: plain-English routing
 
-Instead of picking the model yourself, you'll describe your problem in plain English and the agent routes you automatically:
+Instead of importing the model yourself, you'll be able to describe your problem and the agent will pick the right model automatically.
 
-- *"Which customers are about to cancel?"* → ChurnModel
-- *"Are these reviews positive or negative?"* → SentimentModel
-- *"Flag suspicious transactions"* → FraudModel
-- *"Group my customers into segments"* → SegmentationModel
+- *"Which customers are about to cancel?"* → Churn
+- *"Are these reviews positive or negative?"* → Sentiment
+- *"Find suspicious transactions"* → Fraud
+- *"Group my customers"* → Segmentation
