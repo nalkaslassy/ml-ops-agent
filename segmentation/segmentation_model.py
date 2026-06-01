@@ -41,6 +41,7 @@ class SegmentationModel:
         self.scaler       = None
         self.best_model   = None
         self.best_name    = None
+        self.best_score   = None
         self.labels_      = None
         self.is_fitted    = False
 
@@ -115,6 +116,7 @@ class SegmentationModel:
         self._X_scaled = X
         self._X_raw    = X_raw.reset_index(drop=True)
 
+        self.best_score = best_score
         print(f"\nWinner: {self.best_name} (Silhouette: {best_score:.4f})\n")
         self._print_profiles()
         self._plot(X, results)

@@ -68,6 +68,7 @@ class ChurnModel:
         self.cv           = cv
         self.best_model   = None
         self.best_name    = None
+        self.best_score   = None
         self.is_fitted    = False
 
     def _validate(self, df):
@@ -155,6 +156,7 @@ class ChurnModel:
                 self.best_name  = algo["name"]
                 self._best_params = search.best_params_
 
+        self.best_score = best_score
         print(f"\nWinner: {self.best_name} (AUC: {best_score:.4f})")
         print(f"Params: {self._best_params}\n")
 

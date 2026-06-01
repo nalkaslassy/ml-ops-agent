@@ -10,6 +10,9 @@ from sklearn.pipeline import Pipeline
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
+from sklearn.svm import LinearSVC
+from sklearn.naive_bayes import MultinomialNB
+from sklearn.calibration import CalibratedClassifierCV
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import classification_report, roc_auc_score, roc_curve, ConfusionMatrixDisplay
 from xgboost import XGBClassifier
@@ -23,6 +26,20 @@ ALGORITHMS = [
             "classifier__C":      [0.01, 0.1, 1, 10, 100],
             "classifier__solver": ["lbfgs", "saga"],
             "classifier__penalty":["l2"],
+        }
+    },
+    {
+        "name": "Linear SVC",
+        "model": CalibratedClassifierCV(LinearSVC(random_state=42, max_iter=2000)),
+        "params": {
+            "classifier__estimator__C": [0.01, 0.1, 1, 10, 100],
+        }
+    },
+    {
+        "name": "Naive Bayes",
+        "model": MultinomialNB(),
+        "params": {
+            "classifier__alpha": [0.01, 0.1, 0.5, 1.0, 2.0],
         }
     },
     {
@@ -71,6 +88,7 @@ class SentimentModel:
         self.encoder      = None
         self.best_model   = None
         self.best_name    = None
+        self.best_score   = None
         self.is_fitted    = False
 
     def _validate(self, df):
@@ -152,6 +170,7 @@ class SentimentModel:
                 self.best_name  = algo["name"]
                 self._best_params = search.best_params_
 
+        self.best_score = best_score
         print(f"\nWinner: {self.best_name} (AUC: {best_score:.4f})")
         print(f"Params: {self._best_params}\n")
 
