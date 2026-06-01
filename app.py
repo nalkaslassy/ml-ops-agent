@@ -14,6 +14,40 @@ import streamlit as st
 
 from agent.router import route, route_and_get_class
 
+
+def get_compatible_models(df):
+    """
+    Inspect df's structure and return a list of (model_name, reason) for every
+    model that could realistically be trained on it.
+    """
+    compatible = []
+    n = len(df)
+
+    numeric_cols = df.select_dtypes(include=["int64", "float64", "int32", "float32"]).columns.tolist()
+    text_cols    = [c for c in df.columns
+                    if pd.api.types.is_string_dtype(df[c]) or pd.api.types.is_object_dtype(df[c])]
+    binary_01    = [c for c in numeric_cols
+                    if df[c].nunique() == 2 and set(df[c].dropna().unique()).issubset({0, 1})]
+    binary_any   = [c for c in df.columns if df[c].nunique() == 2]
+
+    # Churn / Fraud: 200+ rows, binary 0/1 target, 2+ other columns
+    if n >= 200 and binary_01:
+        others = [c for c in df.columns if c not in binary_01]
+        if len(others) >= 2:
+            compatible.append(("ChurnModel",  "has a binary (0/1) target column and multiple feature columns"))
+            compatible.append(("FraudModel",  "has a binary (0/1) target column — works if the rare class represents fraud events"))
+
+    # Sentiment: 200+ rows, at least one text column, at least one binary label
+    if n >= 200 and text_cols and binary_any:
+        compatible.append(("SentimentModel", "has a text column and a binary label column"))
+
+    # Segmentation: 50+ rows, 2+ numeric columns (no label needed)
+    if n >= 50 and len(numeric_cols) >= 2:
+        compatible.append(("SegmentationModel", "has numeric feature columns that can be grouped without a label"))
+
+    return compatible
+
+
 st.set_page_config(page_title="ML Ops Agent", layout="wide")
 st.title("ML Ops Agent")
 st.caption("Describe your problem, upload a dataset, and the agent picks and trains the best model automatically.")
@@ -37,7 +71,7 @@ with tab_train:
             routed = route(problem, prefer_llm=False)
             st.success(f"**Model selected:** {routed['model']}")
             st.write(routed["reason"])
-            with st.expander("Data requirements"):
+            with st.expander("Data requirements for this model"):
                 for req in routed["data_needed"]:
                     st.write(f"• {req}")
 
@@ -52,6 +86,19 @@ with tab_train:
             st.write(f"**{len(df):,} rows × {len(df.columns)} columns**")
             st.dataframe(df.head(), use_container_width=True)
 
+            # Show which models this data is structurally compatible with
+            compatible = get_compatible_models(df)
+            if compatible:
+                with st.expander("What can we do with this data?"):
+                    for model_name_c, reason in compatible:
+                        st.write(f"**{model_name_c}** — {reason}")
+            else:
+                st.warning(
+                    "This data doesn't appear compatible with any of our supported models. "
+                    "We support: Churn, Fraud (binary 0/1 target + feature columns), "
+                    "Sentiment (text column + binary label), and Segmentation (numeric columns, no label needed)."
+                )
+
     with right:
         if problem and df is not None and routed:
             model_name = routed["model"]
@@ -61,31 +108,69 @@ with tab_train:
 
             if model_name in ("ChurnModel", "FraudModel"):
                 target = st.selectbox("Target column (what to predict)", cols)
-                drop = st.multiselect("Columns to exclude (IDs, keys)", [c for c in cols if c != target])
+                drop   = st.multiselect("Columns to exclude (IDs, keys)", [c for c in cols if c != target])
                 init_kwargs = {"target_col": target, "drop_cols": drop}
 
             elif model_name == "SentimentModel":
-                text_col = st.selectbox("Text column", cols)
+                text_col  = st.selectbox("Text column", cols)
                 label_col = st.selectbox("Label column", [c for c in cols if c != text_col])
                 init_kwargs = {"text_col": text_col, "target_col": label_col}
 
-            else:  # SegmentationModel
+            else:  # SegmentationModel — no n_iter / cv
                 drop = st.multiselect("Columns to exclude (IDs, keys)", cols)
                 init_kwargs = {"drop_cols": drop}
 
-            with st.expander("Advanced settings"):
-                n_iter = st.slider("Hyperparameter configs to test per algorithm", 1, 30, 10)
-                cv = st.slider("Cross-validation folds", 2, 10, 5)
-                init_kwargs["n_iter"] = n_iter
-                init_kwargs["cv"] = cv
+            # Advanced settings only for models that support tuning
+            if model_name != "SegmentationModel":
+                with st.expander("Advanced settings"):
+                    n_iter = st.slider("Hyperparameter configs to test per algorithm", 1, 30, 10)
+                    cv     = st.slider("Cross-validation folds", 2, 10, 5)
+                    init_kwargs["n_iter"] = n_iter
+                    init_kwargs["cv"]     = cv
 
+            # ── Compatibility check ────────────────────────────────────────────
             st.divider()
-            st.subheader("4. Train")
+            st.subheader("4. Compatibility check")
 
-            if st.button("Train Model", type="primary", use_container_width=True):
+            compatible_with_chosen = False
+            try:
+                ModelClass = route_and_get_class(problem, prefer_llm=False)["model_class"]
+                # Validate using only the structural kwargs (exclude n_iter/cv)
+                validate_kwargs = {k: v for k, v in init_kwargs.items()
+                                   if k not in ("n_iter", "cv")}
+                ModelClass(**validate_kwargs)._validate(df)
+                st.success(f"Your data is compatible with **{model_name}**. Ready to train.")
+                compatible_with_chosen = True
+            except ValueError as e:
+                st.error(f"**Not compatible with {model_name}:** {e}")
+
+                # Suggest alternatives based on data structure
+                alternatives = [m for m, _ in get_compatible_models(df) if m != model_name]
+                if alternatives:
+                    alt_list = ", ".join(dict.fromkeys(alternatives))  # deduplicated, order preserved
+                    st.info(
+                        f"Your data looks compatible with: **{alt_list}**. "
+                        f"Try rephrasing your problem to match one of these, or check the "
+                        f"**About** tab to see what data each model requires."
+                    )
+                else:
+                    st.info(
+                        "Your data doesn't appear compatible with any of our supported models. "
+                        "Check the **About** tab for data requirements."
+                    )
+
+            # ── Train ──────────────────────────────────────────────────────────
+            st.divider()
+            st.subheader("5. Train")
+
+            if st.button(
+                "Train Model",
+                type="primary",
+                use_container_width=True,
+                disabled=not compatible_with_chosen,
+            ):
                 with st.spinner(f"Training {model_name} — testing all algorithms, this may take a few minutes..."):
                     try:
-                        ModelClass = route_and_get_class(problem, prefer_llm=False)["model_class"]
                         model = ModelClass(**init_kwargs)
                         model.fit(df)
 
@@ -201,7 +286,7 @@ with tab_about:
         "For each model type the agent tests multiple algorithms across many hyperparameter "
         "configurations using cross-validation, then picks whichever scores best on your specific data:"
     )
-    data = {
+    algo_data = {
         "Model": ["Churn", "Fraud", "Sentiment", "Segmentation"],
         "Algorithms tested": [
             "XGBoost, Random Forest, Logistic Regression",
@@ -211,7 +296,7 @@ with tab_about:
         ],
         "Scored by": ["ROC-AUC", "Precision-Recall AUC", "ROC-AUC", "Silhouette score"],
     }
-    st.table(pd.DataFrame(data))
+    st.table(pd.DataFrame(algo_data))
 
     st.header("Saving and reusing your model")
     st.write(
@@ -231,6 +316,7 @@ with tab_about:
     st.write(
         "- Models handle missing values automatically via imputation\n"
         "- Your data should be reasonably clean (correct column types, no obvious errors)\n"
-        "- If your data is not compatible, the model will tell you exactly what is wrong\n"
+        "- If your data is not compatible, the agent will tell you exactly what is wrong "
+        "and suggest which model would work instead\n"
         "- Drop ID columns and other non-feature columns using the exclude list during configuration"
     )
