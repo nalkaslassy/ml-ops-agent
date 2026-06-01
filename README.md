@@ -6,28 +6,29 @@ Give it a cleaned dataset, tell it what you want to predict, and it figures out 
 
 ## How it works
 
-The agent runs 3 algorithms on your data — XGBoost, Random Forest, and Logistic Regression. Each one is tested with 10 different settings using 5-fold cross-validation. The one that scores highest on your specific dataset wins and is used for predictions.
-
-You don't pick the algorithm. The agent does.
+The agent runs multiple algorithms on your data, tests each one with different settings, and picks whichever scores best on your specific dataset. You don't choose the algorithm — the agent does.
 
 ---
 
 ## Important: data requirements
 
 - Your dataset must be **cleaned** before using it (no missing values, correct column types)
-- You need to tell it which column you want to predict
+- You need to tell it which column you want to predict (except Segmentation — that one needs no target)
 - If your data isn't compatible with the model you're using, it will stop and tell you exactly why
 
 > Automatic data cleaning is planned for a future version.
 
 ---
 
-## What's available
+## Models
 
 ### Churn Prediction ✅
 **File:** `churn/churn_model.py`
 
-Predicts which customers are likely to leave. Give it a dataset with customer features and a column marking who churned (0 = stayed, 1 = left).
+Predicts which customers are likely to leave.
+
+**Algorithms tested:** XGBoost, Random Forest, Logistic Regression (10 settings each, 5-fold CV)
+**Compatible data:** Tabular dataset with customer features + a binary churn column (0 = stayed, 1 = left)
 
 ```python
 from churn.churn_model import ChurnModel
@@ -43,7 +44,10 @@ predictions = model.predict(new_df)
 ### Sentiment Analysis ✅
 **File:** `sentiment/sentiment_model.py`
 
-Classifies text as positive or negative. Works on reviews, feedback, comments — anything with a text column and a label.
+Classifies text (reviews, feedback, comments) as positive or negative.
+
+**Algorithms tested:** XGBoost, Random Forest, Logistic Regression (10 settings each, 5-fold CV)
+**Compatible data:** Dataset with a text column and a binary label column (0/1 or "positive"/"negative")
 
 ```python
 from sentiment.sentiment_model import SentimentModel
@@ -54,21 +58,46 @@ predictions = model.predict(new_df)
 # Returns: text, label (Positive / Negative), confidence score
 ```
 
-Labels can be 0/1 or strings like "positive"/"negative" — either works.
-
 ---
 
-### Fraud Detection 🔜
+### Fraud Detection ✅
 **File:** `fraud/fraud_model.py`
 
-Coming soon. Built for transaction datasets where fraud is a small fraction of records.
+Identifies fraudulent transactions. Built specifically for datasets where fraud is a tiny fraction of records — all 3 algorithms are configured to handle that imbalance automatically. Uses Precision-Recall AUC as the scoring metric, which is more meaningful than ROC-AUC for imbalanced data.
+
+**Algorithms tested:** XGBoost, Random Forest, Logistic Regression (all with imbalance handling, 10 settings each, 5-fold CV)
+**Compatible data:** Tabular transaction dataset with a binary fraud column (0 = legitimate, 1 = fraud)
+
+```python
+from fraud.fraud_model import FraudModel
+
+model = FraudModel(target_col="is_fraud", drop_cols=["transaction_id"])
+model.fit(df)
+predictions = model.predict(new_df)
+# Returns: fraud_probability, is_fraud
+```
 
 ---
 
-### Customer Segmentation 🔜
+### Customer Segmentation ✅
 **File:** `segmentation/segmentation_model.py`
 
-Coming soon. Groups customers into segments — no target label needed.
+Groups customers into segments. No target label needed — it finds the natural groupings in your data automatically.
+
+**Algorithms tested:** K-Means (k=2 through 8) and DBSCAN (multiple settings) — best silhouette score wins
+**Compatible data:** Tabular dataset with numeric customer features. No target column required.
+
+```python
+from segmentation.segmentation_model import SegmentationModel
+
+model = SegmentationModel(drop_cols=["customer_id"])
+model.fit(df)
+segments = model.predict(new_df)
+# Returns: segment number per row
+
+profiles = model.segment_profiles()
+# Returns: mean feature values per segment (useful for understanding each group)
+```
 
 ---
 
@@ -77,15 +106,15 @@ Coming soon. Groups customers into segments — no target label needed.
 ```
 ml-ops-agent/
 ├── churn/
-│   ├── churn_model.py        ✅ ready
+│   ├── churn_model.py        ✅
 │   └── churn_notebook.ipynb
 ├── sentiment/
-│   ├── sentiment_model.py    ✅ ready
+│   ├── sentiment_model.py    ✅
 │   └── sentiment_notebook.ipynb
 ├── fraud/
-│   └── fraud_model.py        coming soon
+│   └── fraud_model.py        ✅
 ├── segmentation/
-│   └── segmentation_model.py coming soon
+│   └── segmentation_model.py ✅
 └── agent/
     └── router.py             coming soon
 ```
