@@ -1,4 +1,3 @@
-import re
 import warnings
 import numpy as np
 import pandas as pd
@@ -179,28 +178,6 @@ class ChurnModel:
             "will_churn":        preds,
             "risk_tier":         tiers,
         }, index=df.index)
-
-    def feature_importance(self, top_n=15):
-        if not self.is_fitted:
-            raise RuntimeError("Call fit() before feature_importance().")
-        clf = self.best_model.named_steps["classifier"]
-        if not hasattr(clf, "feature_importances_"):
-            print(f"{self.best_name} doesn't expose feature importances.")
-            return
-        preprocessor = self.best_model.named_steps["preprocessor"]
-        try:
-            names = preprocessor.get_feature_names_out()
-        except Exception:
-            names = [f"feature_{i}" for i in range(len(clf.feature_importances_))]
-        names = [re.sub(r"^(num__|cat__)", "", n) for n in names]
-        importances = clf.feature_importances_
-        idx = np.argsort(importances)[::-1][:top_n]
-        fig, ax = plt.subplots(figsize=(10, 6))
-        ax.barh([names[i] for i in reversed(idx)], [importances[i] for i in reversed(idx)], color="#3498db")
-        ax.set_xlabel("Importance Score")
-        ax.set_title(f"Top {top_n} Feature Importances — {self.best_name}")
-        plt.tight_layout()
-        plt.show()
 
     def _plot(self, y_test, y_pred, y_prob, results):
         fig, axes = plt.subplots(1, 3, figsize=(18, 5))
