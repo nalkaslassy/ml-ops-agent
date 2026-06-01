@@ -83,9 +83,11 @@ class ChurnModel:
             )
         unique_vals = set(df[self.target_col].dropna().unique())
         if not unique_vals.issubset({0, 1}):
+            sample = sorted(str(v) for v in unique_vals)[:5]
+            suffix = f" … ({len(unique_vals)} unique values total)" if len(unique_vals) > 5 else ""
             raise ValueError(
-                f"Target column '{self.target_col}' must be binary (0s and 1s), "
-                f"but found: {sorted(unique_vals)}"
+                f"Target column '{self.target_col}' must be binary (0 = retained, 1 = churned), "
+                f"but found: {sample}{suffix}"
             )
         drop = [self.target_col] + [c for c in self.drop_cols if c in df.columns]
         feature_cols = [c for c in df.columns if c not in drop]
