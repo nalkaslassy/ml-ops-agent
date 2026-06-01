@@ -4,6 +4,20 @@ Describe your business problem in plain English and give it a dataset — the ag
 
 ---
 
+## UI (recommended)
+
+```
+.\.venv\Scripts\streamlit.exe run app.py
+```
+
+Opens at `http://localhost:8501`. Three tabs:
+
+- **Train** — describe your problem, drag and drop a CSV, configure columns, train. Downloads a `.pkl` of the trained model.
+- **Predict** — upload a `.pkl` + new CSV, get predictions back as a downloadable CSV.
+- **About** — model descriptions, data requirements, usage guide.
+
+---
+
 ## How it works
 
 The router maps your problem description to one of four models. The model then tests multiple algorithms on your data, tunes each one, and picks whichever performs best.
@@ -17,9 +31,20 @@ ModelClass = result["model_class"]
 model = ModelClass(target_col="churned", drop_cols=["customer_id"])
 model.fit(df)
 predictions = model.predict(new_df)
+
+print(model.best_name)   # e.g. "XGBoost"
+print(model.best_score)  # e.g. 0.8921
 ```
 
 The router works out of the box with keyword matching. Set `ANTHROPIC_API_KEY` in your environment to use Claude for smarter routing.
+
+To reuse a trained model later:
+
+```python
+import joblib
+model = joblib.load("my_model.pkl")
+predictions = model.predict(new_df)
+```
 
 ---
 
@@ -49,7 +74,7 @@ predictions = model.predict(new_df)
 
 Classifies text (reviews, feedback, comments) as positive or negative.
 
-**Algorithms:** XGBoost, Random Forest, Logistic Regression (10 configs each, 5-fold CV) — best ROC-AUC wins  
+**Algorithms:** Logistic Regression, Linear SVC, Naive Bayes, Random Forest, XGBoost (10 configs each, 5-fold CV) — best ROC-AUC wins  
 **Data:** Dataset with a text column and a binary label column (0/1 or "positive"/"negative")
 
 ```python
@@ -116,6 +141,7 @@ profiles = model.segment_profiles()
 
 ```
 ml-ops-agent/
+├── app.py                     # Streamlit UI
 ├── agent/
 │   └── router.py              # routes plain-English problems to the right model
 ├── churn/
