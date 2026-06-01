@@ -58,6 +58,13 @@ class FraudModel:
                 f"Target column '{self.target_col}' must be binary (0 = legitimate, 1 = fraud), "
                 f"but found: {sample}{suffix}"
             )
+        if len(unique_vals) < 2:
+            only = list(unique_vals)[0]
+            label = "No fraud cases (1) found" if only == 0 else "No legitimate cases (0) found"
+            raise ValueError(
+                f"Target column '{self.target_col}' contains only one class. "
+                f"{label} — both classes must be present to train."
+            )
         drop = [self.target_col] + [c for c in self.drop_cols if c in df.columns]
         feature_cols = [c for c in df.columns if c not in drop]
         if len(feature_cols) < 2:

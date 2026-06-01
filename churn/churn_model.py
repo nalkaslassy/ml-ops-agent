@@ -89,6 +89,11 @@ class ChurnModel:
                 f"Target column '{self.target_col}' must be binary (0 = retained, 1 = churned), "
                 f"but found: {sample}{suffix}"
             )
+        if len(unique_vals) < 2:
+            raise ValueError(
+                f"Target column '{self.target_col}' contains only one class ({list(unique_vals)[0]}). "
+                f"Both 0 (retained) and 1 (churned) must be present to train."
+            )
         drop = [self.target_col] + [c for c in self.drop_cols if c in df.columns]
         feature_cols = [c for c in df.columns if c not in drop]
         if len(feature_cols) < 2:
