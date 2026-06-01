@@ -1,34 +1,37 @@
 # ML Ops Agent
 
-Give it a cleaned dataset, tell it what you want to predict, and it figures out the best ML algorithm for your data automatically.
+Describe your business problem in plain English and give it a dataset — the agent picks the right model and the best algorithm automatically.
 
 ---
 
 ## How it works
 
-The agent runs multiple algorithms on your data, tests each one with different settings, and picks whichever scores best on your specific dataset. You don't choose the algorithm — the agent does.
+The router maps your problem description to one of four models. The model then tests multiple algorithms on your data, tunes each one, and picks whichever performs best.
 
----
+```python
+from agent.router import route_and_get_class
 
-## Important: data requirements
+result = route_and_get_class("Which customers are likely to cancel?")
+ModelClass = result["model_class"]
 
-- Your dataset must be **cleaned** before using it (no missing values, correct column types)
-- You need to tell it which column you want to predict (except Segmentation — that one needs no target)
-- If your data isn't compatible with the model you're using, it will stop and tell you exactly why
+model = ModelClass(target_col="churned", drop_cols=["customer_id"])
+model.fit(df)
+predictions = model.predict(new_df)
+```
 
-> Automatic data cleaning is planned for a future version.
+The router works out of the box with keyword matching. Set `ANTHROPIC_API_KEY` in your environment to use Claude for smarter routing.
 
 ---
 
 ## Models
 
-### Churn Prediction ✅
-**File:** `churn/churn_model.py`
+### Churn Prediction
+**File:** `churn/churn_model.py` | **Notebook:** `churn/churn_notebook.ipynb`
 
 Predicts which customers are likely to leave.
 
-**Algorithms tested:** XGBoost, Random Forest, Logistic Regression (10 settings each, 5-fold CV)
-**Compatible data:** Tabular dataset with customer features + a binary churn column (0 = stayed, 1 = left)
+**Algorithms:** XGBoost, Random Forest, Logistic Regression (10 configs each, 5-fold CV) — best ROC-AUC wins  
+**Data:** Tabular dataset with customer features + binary churn column (0 = stayed, 1 = left)
 
 ```python
 from churn.churn_model import ChurnModel
@@ -41,32 +44,32 @@ predictions = model.predict(new_df)
 
 ---
 
-### Sentiment Analysis ✅
-**File:** `sentiment/sentiment_model.py`
+### Sentiment Analysis
+**File:** `sentiment/sentiment_model.py` | **Notebook:** `sentiment/sentiment_notebook.ipynb`
 
 Classifies text (reviews, feedback, comments) as positive or negative.
 
-**Algorithms tested:** XGBoost, Random Forest, Logistic Regression (10 settings each, 5-fold CV)
-**Compatible data:** Dataset with a text column and a binary label column (0/1 or "positive"/"negative")
+**Algorithms:** XGBoost, Random Forest, Logistic Regression (10 configs each, 5-fold CV) — best ROC-AUC wins  
+**Data:** Dataset with a text column and a binary label column (0/1 or "positive"/"negative")
 
 ```python
 from sentiment.sentiment_model import SentimentModel
 
 model = SentimentModel(text_col="review", target_col="sentiment")
 model.fit(df)
-predictions = model.predict(new_df)
-# Returns: text, label (Positive / Negative), confidence score
+predictions = model.predict(new_df["review"])
+# Returns: text, label (positive / negative), confidence score
 ```
 
 ---
 
-### Fraud Detection ✅
+### Fraud Detection
 **File:** `fraud/fraud_model.py`
 
-Identifies fraudulent transactions. Built specifically for datasets where fraud is a tiny fraction of records — all 3 algorithms are configured to handle that imbalance automatically. Uses Precision-Recall AUC as the scoring metric, which is more meaningful than ROC-AUC for imbalanced data.
+Detects fraudulent transactions. Built for datasets where fraud is a small fraction of records — all algorithms are configured to handle class imbalance. Uses Precision-Recall AUC as the scoring metric, which is more meaningful than ROC-AUC on imbalanced data.
 
-**Algorithms tested:** XGBoost, Random Forest, Logistic Regression (all with imbalance handling, 10 settings each, 5-fold CV)
-**Compatible data:** Tabular transaction dataset with a binary fraud column (0 = legitimate, 1 = fraud)
+**Algorithms:** XGBoost, Random Forest, Logistic Regression (all with imbalance handling, 10 configs each, 5-fold CV)  
+**Data:** Tabular transaction dataset with binary fraud column (0 = legitimate, 1 = fraud)
 
 ```python
 from fraud.fraud_model import FraudModel
@@ -79,13 +82,13 @@ predictions = model.predict(new_df)
 
 ---
 
-### Customer Segmentation ✅
+### Customer Segmentation
 **File:** `segmentation/segmentation_model.py`
 
-Groups customers into segments. No target label needed — it finds the natural groupings in your data automatically.
+Groups customers into natural segments. No target label needed — it finds the groupings automatically.
 
-**Algorithms tested:** K-Means (k=2 through 8) and DBSCAN (multiple settings) — best silhouette score wins
-**Compatible data:** Tabular dataset with numeric customer features. No target column required.
+**Algorithms:** K-Means (k=2–8) and DBSCAN (multiple settings) — best silhouette score wins  
+**Data:** Tabular dataset with numeric features. No target column required.
 
 ```python
 from segmentation.segmentation_model import SegmentationModel
@@ -96,8 +99,16 @@ segments = model.predict(new_df)
 # Returns: segment number per row
 
 profiles = model.segment_profiles()
-# Returns: mean feature values per segment (useful for understanding each group)
+# Returns: mean feature values per segment
 ```
+
+---
+
+## Data requirements
+
+- Models handle missing values via imputation, but clean data produces better results
+- Specify `target_col` for all models except Segmentation
+- If your data isn't compatible, the model will stop and tell you exactly why
 
 ---
 
@@ -105,27 +116,17 @@ profiles = model.segment_profiles()
 
 ```
 ml-ops-agent/
+├── agent/
+│   └── router.py              # routes plain-English problems to the right model
 ├── churn/
-│   ├── churn_model.py        ✅
+│   ├── churn_model.py
 │   └── churn_notebook.ipynb
 ├── sentiment/
-│   ├── sentiment_model.py    ✅
+│   ├── sentiment_model.py
 │   └── sentiment_notebook.ipynb
 ├── fraud/
-│   └── fraud_model.py        ✅
+│   └── fraud_model.py
 ├── segmentation/
-│   └── segmentation_model.py ✅
-└── agent/
-    └── router.py             coming soon
+│   └── segmentation_model.py
+└── run_smoke_tests.py         # end-to-end tests for all models + router
 ```
-
----
-
-## Coming soon: plain-English routing
-
-Instead of importing the model yourself, you'll be able to describe your problem and the agent will pick the right model automatically.
-
-- *"Which customers are about to cancel?"* → Churn
-- *"Are these reviews positive or negative?"* → Sentiment
-- *"Find suspicious transactions"* → Fraud
-- *"Group my customers"* → Segmentation

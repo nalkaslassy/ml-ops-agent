@@ -113,7 +113,7 @@ class SentimentModel:
         texts = df[self.text_col].apply(self._clean_text)
         y     = df[self.target_col]
 
-        if y.dtype == object:
+        if not pd.api.types.is_numeric_dtype(y):
             self.encoder = LabelEncoder()
             y = self.encoder.fit_transform(y)
             self.label_names = list(self.encoder.classes_)
