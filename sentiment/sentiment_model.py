@@ -2,7 +2,6 @@ import re
 import warnings
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
@@ -14,7 +13,7 @@ from sklearn.svm import LinearSVC
 from sklearn.naive_bayes import MultinomialNB
 from sklearn.calibration import CalibratedClassifierCV
 from sklearn.preprocessing import LabelEncoder
-from sklearn.metrics import classification_report, roc_auc_score, roc_curve, ConfusionMatrixDisplay
+from sklearn.metrics import classification_report, roc_auc_score
 from xgboost import XGBClassifier
 
 
@@ -89,6 +88,7 @@ class SentimentModel:
         self.best_model   = None
         self.best_name    = None
         self.best_score   = None
+        self.results_     = {}
         self.is_fitted    = False
 
     def _validate(self, df):
@@ -165,20 +165,21 @@ class SentimentModel:
             print(f"  {algo['name']:<25} AUC = {score:.4f}{marker}")
 
             if score > best_score:
-                best_score      = score
-                self.best_model = search.best_estimator_
-                self.best_name  = algo["name"]
+                best_score        = score
+                self.best_model   = search.best_estimator_
+                self.best_name    = algo["name"]
                 self._best_params = search.best_params_
 
         self.best_score = best_score
+        self.results_   = results
         print(f"\nWinner: {self.best_name} (AUC: {best_score:.4f})")
         print(f"Params: {self._best_params}\n")
 
         y_pred = self.best_model.predict(X_test)
         y_prob = self.best_model.predict_proba(X_test)[:, 1]
-        print(f"Test AUC: {roc_auc_score(y_test, y_prob):.4f}\n")
+        self.test_score = roc_auc_score(y_test, y_prob)
+        print(f"Test AUC: {self.test_score:.4f}\n")
         print(classification_report(y_test, y_pred, target_names=self.label_names))
-        self._plot(y_test, y_pred, y_prob, results)
         self.is_fitted = True
         return self
 
@@ -199,33 +200,3 @@ class SentimentModel:
             "label":      labels,
             "confidence": np.round(np.maximum(probs, 1 - probs), 4),
         })
-
-    def _plot(self, y_test, y_pred, y_prob, results):
-        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-        fig.suptitle(f"Sentiment Model — Winner: {self.best_name}", fontsize=13, fontweight="bold")
-
-        best = max(results.values())
-        colors = ["#e74c3c" if v == best else "#cccccc" for v in results.values()]
-        bars = axes[0].barh(list(results.keys()), list(results.values()), color=colors)
-        axes[0].set_xlim(0, 1.1)
-        axes[0].set_title("Algorithm Comparison")
-        for bar, v in zip(bars, results.values()):
-            axes[0].text(v + 0.01, bar.get_y() + bar.get_height() / 2, f"{v:.4f}", va="center")
-
-        ConfusionMatrixDisplay.from_predictions(
-            y_test, y_pred, display_labels=self.label_names,
-            ax=axes[1], colorbar=False, cmap="Reds"
-        )
-        axes[1].set_title("Confusion Matrix")
-
-        fpr, tpr, _ = roc_curve(y_test, y_prob)
-        axes[2].plot(fpr, tpr, color="#e74c3c", lw=2, label=f"AUC = {roc_auc_score(y_test, y_prob):.4f}")
-        axes[2].fill_between(fpr, tpr, alpha=0.1, color="#e74c3c")
-        axes[2].plot([0, 1], [0, 1], "k--", lw=1)
-        axes[2].set_xlabel("False Positive Rate")
-        axes[2].set_ylabel("True Positive Rate")
-        axes[2].set_title("ROC Curve")
-        axes[2].legend()
-
-        plt.tight_layout()
-        plt.show()

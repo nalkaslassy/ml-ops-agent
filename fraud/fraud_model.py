@@ -1,7 +1,6 @@
 import warnings
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 
 from sklearn.model_selection import train_test_split, RandomizedSearchCV
@@ -11,10 +10,7 @@ from sklearn.impute import SimpleImputer
 from sklearn.preprocessing import StandardScaler, OneHotEncoder
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (
-    classification_report, average_precision_score,
-    precision_recall_curve, ConfusionMatrixDisplay,
-)
+from sklearn.metrics import classification_report, average_precision_score
 from xgboost import XGBClassifier
 
 
@@ -38,6 +34,7 @@ class FraudModel:
         self.best_model   = None
         self.best_name    = None
         self.best_score   = None
+        self.results_     = {}
         self.is_fitted    = False
 
     def _validate(self, df):
@@ -145,9 +142,9 @@ class FraudModel:
         X = df.drop(columns=drop)
         y = df[self.target_col]
 
-        fraud_rate     = y.mean()
-        n_fraud        = int(y.sum())
-        n_legit        = int((y == 0).sum())
+        fraud_rate       = y.mean()
+        n_fraud          = int(y.sum())
+        n_legit          = int((y == 0).sum())
         scale_pos_weight = n_legit / n_fraud
 
         print(f"Training on {len(X):,} rows | {len(X.columns)} features | Fraud rate: {fraud_rate:.2%}")
@@ -188,14 +185,15 @@ class FraudModel:
                 self._best_params = search.best_params_
 
         self.best_score = best_score
+        self.results_   = results
         print(f"\nWinner: {self.best_name} (Avg Precision: {best_score:.4f})")
         print(f"Params: {self._best_params}\n")
 
         y_pred = self.best_model.predict(X_test)
         y_prob = self.best_model.predict_proba(X_test)[:, 1]
-        print(f"Test Average Precision: {average_precision_score(y_test, y_prob):.4f}\n")
+        self.test_score = average_precision_score(y_test, y_prob)
+        print(f"Test Average Precision: {self.test_score:.4f}\n")
         print(classification_report(y_test, y_pred, target_names=["Legitimate", "Fraud"]))
-        self._plot(y_test, y_pred, y_prob, results)
         self.is_fitted = True
         return self
 
@@ -209,33 +207,3 @@ class FraudModel:
             "fraud_probability": np.round(probs, 4),
             "is_fraud":          preds,
         }, index=df.index)
-
-    def _plot(self, y_test, y_pred, y_prob, results):
-        fig, axes = plt.subplots(1, 3, figsize=(18, 5))
-        fig.suptitle(f"Fraud Model — Winner: {self.best_name}", fontsize=13, fontweight="bold")
-
-        best   = max(results.values())
-        colors = ["#e67e22" if v == best else "#cccccc" for v in results.values()]
-        bars   = axes[0].barh(list(results.keys()), list(results.values()), color=colors)
-        axes[0].set_xlim(0, 1.1)
-        axes[0].set_title("Algorithm Comparison (Avg Precision)")
-        for bar, v in zip(bars, results.values()):
-            axes[0].text(v + 0.01, bar.get_y() + bar.get_height() / 2, f"{v:.4f}", va="center")
-
-        ConfusionMatrixDisplay.from_predictions(
-            y_test, y_pred, display_labels=["Legitimate", "Fraud"],
-            ax=axes[1], colorbar=False, cmap="Oranges"
-        )
-        axes[1].set_title("Confusion Matrix")
-
-        precision, recall, _ = precision_recall_curve(y_test, y_prob)
-        ap = average_precision_score(y_test, y_prob)
-        axes[2].plot(recall, precision, color="#e67e22", lw=2, label=f"AP = {ap:.4f}")
-        axes[2].fill_between(recall, precision, alpha=0.1, color="#e67e22")
-        axes[2].set_xlabel("Recall")
-        axes[2].set_ylabel("Precision")
-        axes[2].set_title("Precision-Recall Curve")
-        axes[2].legend()
-
-        plt.tight_layout()
-        plt.show()

@@ -1,8 +1,3 @@
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-plt.show = lambda *args, **kwargs: None  # suppress blocking calls inside model fit()
-
 import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent))
@@ -15,14 +10,12 @@ import streamlit as st
 from agent.router import route, route_and_get_class
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
 def get_compatible_models(df):
-    """
-    Inspect df's structure and return a list of (model_name, reason) for every
-    model that could realistically be trained on it.
-    """
+    """Return (model_name, reason) for every model that could work with this data."""
     compatible = []
     n = len(df)
-
     numeric_cols = df.select_dtypes(include=["int64", "float64", "int32", "float32"]).columns.tolist()
     text_cols    = [c for c in df.columns
                     if pd.api.types.is_string_dtype(df[c]) or pd.api.types.is_object_dtype(df[c])]
@@ -30,27 +23,97 @@ def get_compatible_models(df):
                     if df[c].nunique() == 2 and set(df[c].dropna().unique()).issubset({0, 1})]
     binary_any   = [c for c in df.columns if df[c].nunique() == 2]
 
-    # Churn / Fraud: 200+ rows, binary 0/1 target, 2+ other columns
-    if n >= 200 and binary_01:
-        others = [c for c in df.columns if c not in binary_01]
-        if len(others) >= 2:
-            compatible.append(("ChurnModel",  "has a binary (0/1) target column and multiple feature columns"))
-            compatible.append(("FraudModel",  "has a binary (0/1) target column — works if the rare class represents fraud events"))
-
-    # Sentiment: 200+ rows, at least one text column, at least one binary label
+    if n >= 200 and binary_01 and len([c for c in df.columns if c not in binary_01]) >= 2:
+        compatible.append(("ChurnModel",  "has a binary (0/1) target column and multiple feature columns"))
+        compatible.append(("FraudModel",  "has a binary (0/1) target column — works if the rare class represents fraud"))
     if n >= 200 and text_cols and binary_any:
         compatible.append(("SentimentModel", "has a text column and a binary label column"))
-
-    # Segmentation: 50+ rows, 2+ numeric columns (no label needed)
     if n >= 50 and len(numeric_cols) >= 2:
         compatible.append(("SegmentationModel", "has numeric feature columns that can be grouped without a label"))
-
     return compatible
 
 
+ALGO_WHY = {
+    "Logistic Regression": (
+        "Logistic Regression won, which means the relationship between your features and the outcome "
+        "is relatively linear. A simpler model generalised best on your data — this is actually a good "
+        "sign, as simpler models tend to be more reliable and easier to interpret."
+    ),
+    "XGBoost": (
+        "XGBoost won, which means your data contains complex non-linear patterns or interactions between "
+        "features that tree-based ensemble methods are better at capturing. Gradient boosting iteratively "
+        "corrects its own errors, making it powerful for structured tabular data."
+    ),
+    "Random Forest": (
+        "Random Forest won by combining hundreds of decision trees and averaging their results. This "
+        "typically happens when individual features interact in non-obvious ways and the data benefits "
+        "from an ensemble approach to reduce overfitting."
+    ),
+    "Linear SVC": (
+        "Linear SVC won, which is the most common outcome for text classification with TF-IDF features. "
+        "It finds an optimal linear boundary between classes in high-dimensional sparse feature space, "
+        "where most other algorithms struggle."
+    ),
+    "Naive Bayes": (
+        "Naive Bayes won, suggesting your text features are relatively independent of each other and "
+        "the classes are well-separated. It is extremely fast and works particularly well when the "
+        "dataset is small or the vocabulary is large."
+    ),
+}
+
+SEGMENTATION_WHY = {
+    "K-Means": (
+        "K-Means found the clearest cluster separation at this number of groups. It works best when "
+        "your customers form roughly spherical, similarly-sized clusters in feature space."
+    ),
+    "DBSCAN": (
+        "DBSCAN outperformed K-Means, meaning your customer groups are not uniformly sized or shaped. "
+        "It finds clusters based on density rather than distance from a centre, which handles "
+        "irregular shapes and automatically identifies outliers as noise."
+    ),
+}
+
+
+def explain_winner(model_name, winner, winner_score, all_results):
+    """Plain-English explanation of why the winning algorithm was chosen."""
+    sorted_results = sorted(all_results.items(), key=lambda x: x[1], reverse=True)
+    second = sorted_results[1] if len(sorted_results) > 1 else None
+
+    # Find matching explanation
+    if model_name == "SegmentationModel":
+        algo_type = "K-Means" if "K-Means" in winner else "DBSCAN"
+        explanation = SEGMENTATION_WHY.get(algo_type, f"{winner} achieved the best silhouette score.")
+    else:
+        explanation = next(
+            (exp for algo, exp in ALGO_WHY.items() if algo.lower() in winner.lower()),
+            f"{winner} achieved the highest score on your specific dataset."
+        )
+
+    if second:
+        margin = winner_score - second[1]
+        if margin > 0.05:
+            explanation += (
+                f"\n\nIt clearly outperformed {second[0]} (gap: +{margin:.3f}), "
+                f"which is a strong signal that this algorithm fits your data well."
+            )
+        elif margin > 0.01:
+            explanation += (
+                f"\n\nIt edged out {second[0]} by {margin:.3f}. Both are reasonable choices "
+                f"for your data, but this one was consistently better across cross-validation folds."
+            )
+        else:
+            explanation += (
+                f"\n\nThe margin over {second[0]} is very small ({margin:.4f}) — both algorithms "
+                f"performed nearly identically. The winner was selected by a slim margin."
+            )
+    return explanation
+
+
+# ── Page setup ────────────────────────────────────────────────────────────────
+
 st.set_page_config(page_title="ML Ops Agent", layout="wide")
 st.title("ML Ops Agent")
-st.caption("Describe your problem, upload a dataset, and the agent picks and trains the best model automatically.")
+st.caption("Upload a dataset, describe what you want to do, and the agent picks and trains the best model automatically.")
 
 tab_train, tab_predict, tab_about = st.tabs(["Train", "Predict", "About"])
 
@@ -78,6 +141,7 @@ with tab_train:
         st.divider()
 
         st.subheader("2. Upload your dataset")
+        st.caption("Upload a cleaned CSV file. Column headers must be on the first row.")
         uploaded = st.file_uploader("Drag and drop a CSV file", type=["csv"])
 
         df = None
@@ -86,22 +150,19 @@ with tab_train:
             st.write(f"**{len(df):,} rows × {len(df.columns)} columns**")
             st.dataframe(df.head(), use_container_width=True)
 
-            # Show which models this data is structurally compatible with
-            compatible = get_compatible_models(df)
-            if compatible:
-                with st.expander("What can we do with this data?"):
-                    for model_name_c, reason in compatible:
-                        st.write(f"**{model_name_c}** — {reason}")
-            else:
-                st.warning(
-                    "This data doesn't appear compatible with any of our supported models. "
-                    "We support: Churn, Fraud (binary 0/1 target + feature columns), "
-                    "Sentiment (text column + binary label), and Segmentation (numeric columns, no label needed)."
-                )
-
     with right:
         if problem and df is not None and routed:
-            model_name = routed["model"]
+            # Allow user to override the routed model (when they clicked "use X instead")
+            override = st.session_state.get("override_model")
+            model_name = override if override else routed["model"]
+
+            if override:
+                st.info(f"Using **{override}** based on your selection.")
+                if st.button("Reset to original model", key="reset_override"):
+                    del st.session_state["override_model"]
+                    st.session_state.pop("trained", None)
+                    st.rerun()
+
             cols = df.columns.tolist()
 
             st.subheader("3. Configure columns")
@@ -116,11 +177,10 @@ with tab_train:
                 label_col = st.selectbox("Label column", [c for c in cols if c != text_col])
                 init_kwargs = {"text_col": text_col, "target_col": label_col}
 
-            else:  # SegmentationModel — no n_iter / cv
+            else:  # SegmentationModel
                 drop = st.multiselect("Columns to exclude (IDs, keys)", cols)
                 init_kwargs = {"drop_cols": drop}
 
-            # Advanced settings only for models that support tuning
             if model_name != "SegmentationModel":
                 with st.expander("Advanced settings"):
                     n_iter = st.slider("Hyperparameter configs to test per algorithm", 1, 30, 10)
@@ -128,38 +188,47 @@ with tab_train:
                     init_kwargs["n_iter"] = n_iter
                     init_kwargs["cv"]     = cv
 
-            # ── Compatibility check ────────────────────────────────────────────
+            # ── Compatibility check ────────────────────────────────────────
             st.divider()
             st.subheader("4. Compatibility check")
 
             compatible_with_chosen = False
             try:
                 ModelClass = route_and_get_class(problem, prefer_llm=False)["model_class"]
-                # Validate using only the structural kwargs (exclude n_iter/cv)
-                validate_kwargs = {k: v for k, v in init_kwargs.items()
-                                   if k not in ("n_iter", "cv")}
+                if override:
+                    # Load the override class directly
+                    from agent.router import get_model_class
+                    ModelClass = get_model_class(override)
+                validate_kwargs = {k: v for k, v in init_kwargs.items() if k not in ("n_iter", "cv")}
                 ModelClass(**validate_kwargs)._validate(df)
                 st.success(f"Your data is compatible with **{model_name}**. Ready to train.")
                 compatible_with_chosen = True
             except ValueError as e:
                 st.error(f"**Not compatible with {model_name}:** {e}")
 
-                # Suggest alternatives based on data structure
-                alternatives = [m for m, _ in get_compatible_models(df) if m != model_name]
+                # Only suggest alternatives — don't show the expander content here
+                alternatives = list(dict.fromkeys(
+                    m for m, _ in get_compatible_models(df) if m != model_name
+                ))
                 if alternatives:
-                    alt_list = ", ".join(dict.fromkeys(alternatives))  # deduplicated, order preserved
-                    st.info(
-                        f"Your data looks compatible with: **{alt_list}**. "
-                        f"Try rephrasing your problem to match one of these, or check the "
-                        f"**About** tab to see what data each model requires."
+                    st.warning(
+                        f"Your data is not compatible with what you asked for, but it looks compatible "
+                        f"with the following supported model(s): **{', '.join(alternatives)}**"
                     )
+                    st.write("Would you like to use one of these instead?")
+                    btn_cols = st.columns(len(alternatives))
+                    for i, alt in enumerate(alternatives):
+                        if btn_cols[i].button(f"Use {alt}", key=f"use_{alt}"):
+                            st.session_state["override_model"] = alt
+                            st.session_state.pop("trained", None)
+                            st.rerun()
                 else:
-                    st.info(
-                        "Your data doesn't appear compatible with any of our supported models. "
-                        "Check the **About** tab for data requirements."
+                    st.warning(
+                        "Your data does not appear compatible with any of our supported models. "
+                        "See the **About** tab for data requirements."
                     )
 
-            # ── Train ──────────────────────────────────────────────────────────
+            # ── Train ──────────────────────────────────────────────────────
             st.divider()
             st.subheader("5. Train")
 
@@ -169,23 +238,27 @@ with tab_train:
                 use_container_width=True,
                 disabled=not compatible_with_chosen,
             ):
+                # Clear previous results
+                st.session_state.pop("trained", None)
                 with st.spinner(f"Training {model_name} — testing all algorithms, this may take a few minutes..."):
                     try:
+                        if override:
+                            from agent.router import get_model_class
+                            ModelClass = get_model_class(override)
+                        else:
+                            ModelClass = route_and_get_class(problem, prefer_llm=False)["model_class"]
                         model = ModelClass(**init_kwargs)
                         model.fit(df)
-
-                        figs = [plt.figure(i) for i in plt.get_fignums()]
-                        plt.close("all")
-
                         st.session_state["model"]      = model
                         st.session_state["model_name"] = model_name
-                        st.session_state["figs"]       = figs
                         st.session_state["trained"]    = True
                     except Exception as e:
                         st.error(str(e))
 
+            # ── Results ────────────────────────────────────────────────────
             if st.session_state.get("trained"):
                 model = st.session_state["model"]
+                mn    = st.session_state["model_name"]
 
                 st.success("Training complete")
 
@@ -193,8 +266,22 @@ with tab_train:
                 col_a.metric("Best algorithm", model.best_name)
                 col_b.metric("CV score", f"{model.best_score:.4f}")
 
-                for fig in st.session_state.get("figs", []):
-                    st.pyplot(fig, use_container_width=True)
+                # Algorithm comparison table
+                if model.results_:
+                    st.subheader("How every algorithm compared")
+                    rows = sorted(model.results_.items(), key=lambda x: x[1], reverse=True)
+                    table_data = {
+                        "Algorithm": [r[0] for r in rows],
+                        "Score":     [f"{r[1]:.4f}" for r in rows],
+                        "Result":    ["Winner" if r[0] == model.best_name else "" for r in rows],
+                    }
+                    st.table(pd.DataFrame(table_data))
+
+                # Plain-English explanation
+                st.subheader("Why this algorithm was chosen")
+                st.write(explain_winner(mn, model.best_name, model.best_score, model.results_))
+
+                st.divider()
 
                 buf = io.BytesIO()
                 joblib.dump(model, buf)
@@ -202,11 +289,14 @@ with tab_train:
                 st.download_button(
                     "Download trained model (.pkl)",
                     data=buf,
-                    file_name=f"{st.session_state['model_name'].lower()}.pkl",
+                    file_name=f"{mn.lower()}.pkl",
                     mime="application/octet-stream",
                     use_container_width=True,
                 )
-                st.info("Save this file. Upload it in the **Predict** tab to run predictions on new data — no retraining needed.")
+                st.caption(
+                    "Save this file. Upload it in the **Predict** tab to run predictions "
+                    "on new data at any time — no retraining needed."
+                )
 
 
 # ── PREDICT ────────────────────────────────────────────────────────────────────
@@ -223,7 +313,6 @@ with tab_predict:
         if model_file and data_file:
             model  = joblib.load(model_file)
             new_df = pd.read_csv(data_file)
-
             st.write(f"**Model:** {type(model).__name__} — {model.best_name} (score: {model.best_score:.4f})")
             st.write(f"**Data:** {len(new_df):,} rows × {len(new_df.columns)} columns")
             st.dataframe(new_df.head(), use_container_width=True)
@@ -239,7 +328,6 @@ with tab_predict:
 
                     st.success(f"{len(preds):,} predictions generated")
                     st.dataframe(preds, use_container_width=True)
-
                     st.download_button(
                         "Download predictions (CSV)",
                         data=preds.to_csv(index=False).encode(),
@@ -255,9 +343,20 @@ with tab_predict:
 with tab_about:
     st.header("What this does")
     st.write(
-        "Describe your business problem in plain English, upload a CSV dataset, "
-        "and the agent selects the right model type and finds the best algorithm for your specific data. "
-        "No ML knowledge required."
+        "Describe your business problem in plain English, upload a cleaned CSV dataset, and the agent "
+        "selects the right model type and finds the best algorithm for your specific data. "
+        "If your data is not compatible with what you asked for, it will tell you why and show you "
+        "which of the supported models your data does work with."
+    )
+
+    st.header("How to prepare your data")
+    st.write(
+        "- Upload a **CSV file** with column headers on the first row\n"
+        "- The data should be **reasonably clean** — correct column types, no obviously wrong values\n"
+        "- **Missing values** are handled automatically via imputation\n"
+        "- **ID columns** (customer ID, transaction ID, etc.) should be excluded using the exclude list — "
+        "they add noise and won't help the model\n"
+        "- **Minimum rows:** 200 for Churn, Fraud and Sentiment; 50 for Segmentation"
     )
 
     st.header("Supported models")
@@ -266,28 +365,43 @@ with tab_about:
     with col1:
         st.subheader("Churn Prediction")
         st.write("Predicts which customers are likely to leave.")
-        st.caption("Data needed: customer feature columns + a binary churn column (0 = stayed, 1 = left). Minimum 200 rows.")
+        st.caption(
+            "Requires: customer feature columns (numeric or categorical) + "
+            "a binary target column where 0 = stayed and 1 = left."
+        )
 
         st.subheader("Fraud Detection")
-        st.write("Detects fraudulent transactions. Built for imbalanced data where fraud is rare.")
-        st.caption("Data needed: transaction feature columns + a binary fraud column (0 = legitimate, 1 = fraud). Minimum 200 rows.")
+        st.write("Detects fraudulent transactions. Built specifically for imbalanced data where fraud is rare.")
+        st.caption(
+            "Requires: transaction feature columns + "
+            "a binary target column where 0 = legitimate and 1 = fraud. "
+            "Both classes must be present."
+        )
 
     with col2:
         st.subheader("Sentiment Analysis")
         st.write("Classifies text (reviews, feedback, comments) as positive or negative.")
-        st.caption("Data needed: a text column + a label column (0/1 or 'positive'/'negative'). Minimum 200 rows.")
+        st.caption(
+            "Requires: a text column containing the raw text + "
+            "a binary label column (0/1 or 'positive'/'negative')."
+        )
 
         st.subheader("Customer Segmentation")
-        st.write("Groups customers into natural segments automatically. No label column needed.")
-        st.caption("Data needed: numeric feature columns only. Minimum 50 rows.")
+        st.write("Groups customers into natural segments. No label column needed.")
+        st.caption(
+            "Requires: numeric feature columns only. "
+            "No target column — the model finds the groupings automatically."
+        )
 
     st.header("How the algorithm is selected")
     st.write(
-        "For each model type the agent tests multiple algorithms across many hyperparameter "
-        "configurations using cross-validation, then picks whichever scores best on your specific data:"
+        "For each model the agent tests multiple algorithms across many hyperparameter configurations "
+        "using cross-validation, picks whichever scores best on your data, and shows you how every "
+        "algorithm compared and why the winner was chosen."
     )
+
     algo_data = {
-        "Model": ["Churn", "Fraud", "Sentiment", "Segmentation"],
+        "Model":            ["Churn", "Fraud", "Sentiment", "Segmentation"],
         "Algorithms tested": [
             "XGBoost, Random Forest, Logistic Regression",
             "XGBoost, Random Forest, Logistic Regression (all imbalance-aware)",
@@ -300,23 +414,11 @@ with tab_about:
 
     st.header("Saving and reusing your model")
     st.write(
-        "After training, download the `.pkl` file. This contains the fully trained model — "
-        "which algorithm won, all fitted parameters, preprocessing steps. "
-        "Upload it in the **Predict** tab whenever you want predictions on new data. "
-        "You can also load it directly in Python:"
+        "After training, download the `.pkl` file. It contains the fully trained model — "
+        "the winning algorithm, all fitted parameters, and the preprocessing steps. "
+        "Upload it in the **Predict** tab to run predictions on new data at any time without retraining."
     )
     st.code(
-        "import joblib\n"
-        "model = joblib.load('my_model.pkl')\n"
-        "predictions = model.predict(new_df)",
+        "import joblib\nmodel = joblib.load('my_model.pkl')\npredictions = model.predict(new_df)",
         language="python",
-    )
-
-    st.header("Data requirements")
-    st.write(
-        "- Models handle missing values automatically via imputation\n"
-        "- Your data should be reasonably clean (correct column types, no obvious errors)\n"
-        "- If your data is not compatible, the agent will tell you exactly what is wrong "
-        "and suggest which model would work instead\n"
-        "- Drop ID columns and other non-feature columns using the exclude list during configuration"
     )

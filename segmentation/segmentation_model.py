@@ -1,7 +1,6 @@
 import warnings
 import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
 warnings.filterwarnings("ignore")
 
 from sklearn.preprocessing import StandardScaler
@@ -42,6 +41,7 @@ class SegmentationModel:
         self.best_model   = None
         self.best_name    = None
         self.best_score   = None
+        self.results_     = {}
         self.labels_      = None
         self.is_fitted    = False
 
@@ -99,8 +99,8 @@ class SegmentationModel:
                 print(f"  eps={params['eps']} min_samples={params['min_samples']}  -> {n_clusters} cluster(s), skipping")
                 continue
 
-            valid_mask  = labels != -1
-            noise_pct   = (~valid_mask).mean()
+            valid_mask = labels != -1
+            noise_pct  = (~valid_mask).mean()
             score = silhouette_score(X[valid_mask], labels[valid_mask])
             name  = f"DBSCAN (eps={params['eps']}, min={params['min_samples']})"
             results[name] = score
@@ -112,14 +112,14 @@ class SegmentationModel:
                 self.best_model = model
                 self.best_name  = name
 
-        self.labels_   = self.best_model.labels_
-        self._X_scaled = X
-        self._X_raw    = X_raw.reset_index(drop=True)
-
         self.best_score = best_score
+        self.results_   = results
+        self.labels_    = self.best_model.labels_
+        self._X_scaled  = X
+        self._X_raw     = X_raw.reset_index(drop=True)
+
         print(f"\nWinner: {self.best_name} (Silhouette: {best_score:.4f})\n")
         self._print_profiles()
-        self._plot(X, results)
         self.is_fitted = True
         return self
 
@@ -162,31 +162,3 @@ class SegmentationModel:
             for col in self._feature_cols:
                 print(f"    {col}: {group[col].mean():.2f}")
             print()
-
-    def _plot(self, X, results):
-        fig, axes = plt.subplots(1, 2, figsize=(14, 5))
-        fig.suptitle(f"Segmentation Model — Winner: {self.best_name}", fontsize=13, fontweight="bold")
-
-        best   = max(results.values())
-        colors = ["#9b59b6" if v == best else "#cccccc" for v in results.values()]
-        bars   = axes[0].barh(list(results.keys()), list(results.values()), color=colors)
-        axes[0].set_xlim(0, 1.1)
-        axes[0].set_title("Algorithm Comparison (Silhouette Score)")
-        for bar, v in zip(bars, results.values()):
-            axes[0].text(v + 0.01, bar.get_y() + bar.get_height() / 2, f"{v:.4f}", va="center")
-
-        pca  = PCA(n_components=2, random_state=self.random_state)
-        X_2d = pca.fit_transform(X)
-        unique_labels = sorted(set(self.labels_))
-        palette = plt.cm.Set2(np.linspace(0, 1, len(unique_labels)))
-        for label, color in zip(unique_labels, palette):
-            mask = self.labels_ == label
-            name = "Noise" if label == -1 else f"Segment {label} ({mask.sum():,})"
-            axes[1].scatter(X_2d[mask, 0], X_2d[mask, 1], c=[color], label=name, alpha=0.6, s=20)
-        axes[1].set_title("Clusters (PCA — first 2 components)")
-        axes[1].set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]:.1%} variance)")
-        axes[1].set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]:.1%} variance)")
-        axes[1].legend(markerscale=2, fontsize=8)
-
-        plt.tight_layout()
-        plt.show()
