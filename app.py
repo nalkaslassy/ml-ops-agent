@@ -120,6 +120,35 @@ tab_train, tab_predict, tab_about = st.tabs(["Train", "Predict", "About"])
 
 # ── TRAIN ──────────────────────────────────────────────────────────────────────
 with tab_train:
+
+    # ── What we support + data format ─────────────────────────────────────────
+    with st.expander("What models are supported and how should my data be formatted?", expanded=True):
+        info_left, info_right = st.columns(2, gap="large")
+
+        with info_left:
+            st.markdown("**Supported models**")
+            st.markdown(
+                "| Model | What it does | Target column needed? |\n"
+                "|---|---|---|\n"
+                "| **Churn Prediction** | Predicts which customers will leave | Yes — binary (0 = stayed, 1 = left) |\n"
+                "| **Fraud Detection** | Detects fraudulent transactions | Yes — binary (0 = legitimate, 1 = fraud) |\n"
+                "| **Sentiment Analysis** | Classifies text as positive or negative | Yes — binary (0/1 or 'positive'/'negative') |\n"
+                "| **Customer Segmentation** | Groups customers into natural segments | No |\n"
+            )
+
+        with info_right:
+            st.markdown("**Data format requirements**")
+            st.markdown(
+                "- Upload a **CSV file** with column headers on the first row\n"
+                "- Data should be **cleaned** — correct types, no obviously wrong values\n"
+                "- **Missing values** are handled automatically\n"
+                "- **Remove ID columns** (customer ID, transaction ID) using the exclude list — they add noise\n"
+                "- **Minimum rows:** 200 for Churn / Fraud / Sentiment · 50 for Segmentation\n"
+                "- For **Sentiment**, one column must contain the raw text (reviews, comments, etc.)\n"
+                "- For **Churn / Fraud**, the target column must contain only `0` and `1` values, and both must be present"
+            )
+
+    st.divider()
     left, right = st.columns(2, gap="large")
 
     with left:
